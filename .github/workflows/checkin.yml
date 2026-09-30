@@ -1,0 +1,54 @@
+name: iKuuu daily checkin
+
+on:
+  schedule:
+    # 每小时检查到期时间；北京时间 08:17 签到，16:17 补试。
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      force_checkin:
+        description: '立即尝试签到（已签到时只读取当前状态）'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ikuuu-checkin
+  cancel-in-progress: false
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check expiry and check in
+        env:
+          IKUUU_COOKIE: ${{ secrets.IKUUU_COOKIE }}
+          MAIL_USER: ${{ secrets.MAIL_USER }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          NOTIFY_TO: ${{ secrets.NOTIFY_TO }}
+          SMTP_HOST: ${{ vars.SMTP_HOST }}
+          SMTP_PORT: ${{ vars.SMTP_PORT }}
+          IMAP_HOST: ${{ vars.IMAP_HOST }}
+          IMAP_PORT: ${{ vars.IMAP_PORT }}
+          FIND_REPLY_FROM: ${{ vars.FIND_REPLY_FROM }}
+          FORCE_CHECKIN: ${{ inputs.force_checkin }}
+        run: npm run run
+      - name: Save non-secret state
+        if: always()
+        run: |
+          if ! git diff --quiet -- .github/ikuuu-state.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/ikuuu-state.json
+            git commit -m "chore: update iKuuu checkin state"
+            git push
+          fi

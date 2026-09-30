@@ -1,0 +1,5 @@
+.firecrawl/
+ikuuu-cookie.txt
+node_modules/
+.env
+.env.local
