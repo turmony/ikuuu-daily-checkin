@@ -5,7 +5,7 @@ import { simpleParser } from 'mailparser';
 import nodemailer from 'nodemailer';
 import {
   classifyCheckin, cookieExpiry, decodedUserHtml, domainsFromReply,
-  normalizeDomain, remainingTraffic, shanghaiDate, shanghaiHour,
+  normalizeDomain, remainingTraffic, shanghaiDate, CookieExpiredError, withCheckinRetries,
 } from './core.js';
 
 const statePath = '.github/ikuuu-state.json';
@@ -58,14 +58,18 @@ function mailSettings() {
 async function sendMail(to, subject, text) {
   const settings = mailSettings();
   const transport = nodemailer.createTransport({
+    connectionTimeout: 20_000, greetingTimeout: 20_000, socketTimeout: 30_000,
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: Number(process.env.SMTP_PORT || 465),
     secure: Number(process.env.SMTP_PORT || 465) === 465,
     auth: { user: settings.user, pass: settings.pass },
     disableFileAccess: true, disableUrlAccess: true,
   });
-  await transport.sendMail({ from: settings.user, to, subject, text });
-  transport.close();
+  try {
+    await transport.sendMail({ from: settings.user, to, subject, text });
+  } finally {
+    transport.close();
+  }
 }
 
 async function discoverDomainsByEmail(onSent) {
@@ -143,29 +147,25 @@ async function ensureUsableCookie() {
   const domain = state.currentDomain;
   const account = await checkUser(domain);
   if (account.kind === 'authenticated') return;
-  if (account.kind === 'expired') throw new Error('Cookie 已失效，请重新登录并更新 Secret');
-  report.push(`当前域名 ${domain} 无法访问，已请求官网自动回复`);
-  const recovered = await recoverDomain();
-  report.push(`已切换域名：${recovered.domain}`);
+  if (account.kind === 'expired') throw new CookieExpiredError('Cookie 已失效，请重新登录并更新 Secret');
+  throw new Error(`当前域名 ${domain} 无法访问或暂时无法验证登录状态`);
 }
 
 async function runCheckin() {
   const today = shanghaiDate();
-  const hour = shanghaiHour();
-  const scheduledHours = [8, 16];
   if (state.lastCheckinDate === today && process.env.FORCE_CHECKIN !== 'true') {
     report.push('签到：今天已由本工具完成');
     return;
   }
-  if (!scheduledHours.includes(hour) && process.env.FORCE_CHECKIN !== 'true') {
-    report.push('签到：等待北京时间 08:17 或 16:17');
-    return;
-  }
   const domain = state.currentDomain;
   const checkin = await request(domain, '/user/checkin', { method: 'POST' });
+  if ([301, 302, 303, 307, 308].includes(checkin.status) && /\/auth\/login/i.test(checkin.location)) {
+    throw new CookieExpiredError('签到接口提示 Cookie 已失效，请重新登录并更新 Secret');
+  }
   if (checkin.status !== 200) throw new Error(`签到接口 HTTP ${checkin.status}`);
   const result = classifyCheckin(checkin.body);
   const freshAccount = await checkUser(domain);
+  if (freshAccount.kind === 'expired') throw new CookieExpiredError('签到后 Cookie 已失效，请重新登录并更新 Secret');
   if (freshAccount.kind !== 'authenticated') throw new Error('签到后未能读取首页剩余流量');
   report.push(`签到：${result.status === 'success' ? '成功' : '今日已签到'}`);
   report.push(`今日领取：${result.gained || '未知（' + result.message + '）'}`);
@@ -174,12 +174,62 @@ async function runCheckin() {
   await saveState();
 }
 
+let attempts = 0;
+let domainUnavailable = false;
+async function attemptCheckin() {
+  try { await ensureUsableCookie(); }
+  catch (error) {
+    domainUnavailable = !(error instanceof CookieExpiredError);
+    throw error;
+  }
+  domainUnavailable = false;
+  await runCheckin();
+}
+
 try {
-  await ensureUsableCookie();
+  if (state.lastCheckinDate === shanghaiDate() && process.env.FORCE_CHECKIN !== 'true') {
+    report.push('签到：今天已由本工具完成');
+  } else {
+    try {
+      await withCheckinRetries(async number => {
+        attempts = number;
+        await attemptCheckin();
+      }, {
+        wait: sleep,
+        onRetry: (error, number, delay) => {
+          const message = `第 ${number} 次尝试失败：${error.message}；${delay / 60_000} 分钟后重试`;
+          report.push(message);
+          console.log(message);
+        },
+      });
+    } catch (error) {
+      if (error instanceof CookieExpiredError || !domainUnavailable) throw error;
+      report.push('退避重试已耗尽，尝试查询官网新域名');
+      const recovered = await recoverDomain();
+      report.push(`已切换域名：${recovered.domain}`);
+      await attemptCheckin();
+    }
+    report.push(`尝试次数：${attempts}（不含域名恢复后的验证）`);
+  }
   try { await maybeNotifyExpiry(); } catch (error) { problems.push(`到期提醒失败：${error.message}`); }
-  try { await runCheckin(); } catch (error) { problems.push(`签到失败：${error.message}`); }
 } catch (error) {
-  problems.push(`Cookie 验证失败：${error.message}`);
+  const reason = error instanceof CookieExpiredError ? 'Cookie 已失效，已停止重试' : '签到最终失败';
+  problems.push(`${reason}：${error.message}`);
+  const runUrl = process.env.GITHUB_REPOSITORY && process.env.GITHUB_RUN_ID
+    ? `${process.env.GITHUB_SERVER_URL || 'https://github.com'}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`
+    : '本地运行';
+  try {
+    await sendMail(mailSettings().to, `iKuuu ${reason}`, [
+      `北京时间：${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`,
+      `当前域名：${state.currentDomain}`, `签到尝试次数：${attempts}`,
+      `失败原因：${error.message}`, `运行记录：${runUrl}`,
+      error instanceof CookieExpiredError ? '请重新登录并更新 GitHub Actions Secret IKUUU_COOKIE。' : '请查看运行日志，检查网站状态及登录凭证；恢复后可手动运行签到。',
+      ...report,
+    ].join('\n'));
+    report.push('失败通知：已发送');
+  } catch (mailError) {
+    problems.push(`失败通知发送失败：${mailError.message}`);
+  }
 }
 report.unshift(`当前域名：${state.currentDomain}`);
 const summary = `# iKuuu 每日签到\n\n${report.map(v => `- ${v}`).join('\n')}${problems.length ? `\n\n## 需要处理\n\n${problems.map(v => `- ${v}`).join('\n')}` : ''}\n`;

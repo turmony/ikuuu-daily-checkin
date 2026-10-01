@@ -2,8 +2,8 @@ name: iKuuu daily checkin
 
 on:
   schedule:
-    # 每小时检查到期时间；北京时间 08:17 签到，16:17 补试。
-    - cron: '17 * * * *'
+    # 每天北京时间 08:17 执行；失败后在本次运行内退避重试。
+    - cron: '17 0 * * *'
   workflow_dispatch:
     inputs:
       force_checkin:
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

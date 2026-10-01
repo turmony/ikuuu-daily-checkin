@@ -63,3 +63,19 @@ export function shanghaiDate(now = new Date()) {
 export function shanghaiHour(now = new Date()) {
   return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' }).format(now));
 }
+
+export class CookieExpiredError extends Error {}
+
+export const RETRY_DELAYS_MS = [10, 30, 100].map(minutes => minutes * 60_000);
+
+export async function withCheckinRetries(attempt, { wait, onRetry = () => {}, delays = RETRY_DELAYS_MS } = {}) {
+  for (let index = 0; ; index++) {
+    try {
+      return await attempt(index + 1);
+    } catch (error) {
+      if (error instanceof CookieExpiredError || index >= delays.length) throw error;
+      await onRetry(error, index + 1, delays[index]);
+      await wait(delays[index]);
+    }
+  }
+}
