@@ -38,6 +38,7 @@ export class CheckinObject extends DurableObject {
       await this.auth.requireSession(token);
       if(action==='status' || action==='history') return this.engine.status();
       if(action==='cookie') return this.engine.updateCookie(body.cookie);
+      if(action==='renew-cookie') return this.engine.renewCookie();
       if(action==='initialize') return this.engine.initialize(body);
       if(action==='run') return this.engine.runNow();
       if(action==='test-email') return this.engine.testEmail();

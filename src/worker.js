@@ -42,7 +42,7 @@ export default {
         else if(path==='/api/auth/recover') {result=await stub.recover(body.recoveryCode,body.password,clientKey);clear=true;}
         else if(path==='/api/auth/change-password') {result=await stub.changePassword(token,body.currentPassword,body.newPassword,clientKey);clear=true;}
         else if(path==='/api/auth/logout') {result=await stub.logout(token);clear=true;}
-      } else if((request.method==='GET' && ['/api/status','/api/history'].includes(path)) || (request.method==='POST' && ['/api/cookie','/api/initialize','/api/run','/api/test-email','/api/pause','/api/resume'].includes(path))) {
+      } else if((request.method==='GET' && ['/api/status','/api/history'].includes(path)) || (request.method==='POST' && ['/api/cookie','/api/renew-cookie','/api/initialize','/api/run','/api/test-email','/api/pause','/api/resume'].includes(path))) {
         result=await stub.manage(path.slice(5),body,token);
       }
       if(!result) return json({error:'接口或请求方法不正确'},404);

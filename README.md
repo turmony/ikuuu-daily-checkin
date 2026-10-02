@@ -6,8 +6,9 @@
 
 - 每天北京时间 **08:17** 自动签到。
 - 首次失败后依次等待 **10、30、100 分钟**，最多四次尝试。
-- Cookie 明确失效时停止签到并通知；更新后恢复当天未完成的任务。
-- 到期前 24 小时提醒，签到成功后记录领取量和剩余流量。
+- 配置网站账户后，到期前 24 小时自动登录更新 Cookie；提前失效时尝试自动恢复。
+- 遇到验证码、邮箱或二次验证时停止自动登录并通知，保留手动更新入口。
+- 未配置自动登录时保留到期提醒；签到成功后记录领取量和剩余流量。
 - 从 `https://ikuuu.win/` 发现并验证候选域名。
 - SMTP 通知独立重试，管理页面支持密码登录、恢复码重置、查询状态、更新 Cookie、暂停和恢复。
 - GitHub CI 检查与 Cloudflare Workers Builds 自动部署。
@@ -100,7 +101,22 @@ node scripts/control.mjs test-email
 node scripts/control.mjs status
 ```
 
-确认收件箱收到测试邮件，再将网站登录后的完整 Cookie 保存至项目根目录的 `ikuuu-cookie.txt`，执行：
+确认收件箱收到测试邮件后，在 Cloudflare Dashboard → 目标 Worker → **Settings → Variables and Secrets** 添加以下两个 **Secret**，保存并部署：
+
+| 名称 | 内容 |
+| --- | --- |
+| `IKUUU_EMAIL` | iKuuu 网站登录邮箱 |
+| `IKUUU_PASSWORD` | iKuuu 网站登录密码（不是管理页面密码） |
+
+打开并登录管理页面，点击“自动登录并更新 Cookie”，或执行：
+
+```sh
+node scripts/control.mjs renew-cookie
+```
+
+任务由 Alarm 执行，页面会显示是否已配置、最近自动更新时间、下次登录时间及失败原因。没有 Cookie 时，首次读取管理状态也会安排自动登录；已有 Cookie 时会安排在到期前 24 小时更新。添加 Secrets 不会主动唤醒休眠对象，首次配置后请打开管理页面或执行上述命令。更新 Secrets 后如果之前已停止自动登录，请点击该按钮重试。
+
+**当前登录页面要求极验验证码，并支持邮箱验证和 TOTP。账号密码不能保证无人值守登录成功**：程序尝试普通密码登录，服务端要求人工验证时停止尝试并发邮件。此时请手动登录网站，再将完整 Cookie 保存至项目根目录的 `ikuuu-cookie.txt`，执行：
 
 ```sh
 node scripts/control.mjs cookie
@@ -118,11 +134,12 @@ node scripts/control.mjs cookie
 | `NOTIFY_TO` | Cloudflare Secret | 通知收件邮箱 |
 | `ADMIN_TOKEN` | Cloudflare Secret | 首次设密及忘记密码时的恢复码 |
 | `COOKIE_ENCRYPTION_KEY` | Cloudflare Secret | 32 字节 AES-GCM 密钥的 Base64 |
+| `IKUUU_EMAIL`、`IKUUU_PASSWORD` | Cloudflare Secret，可选 | iKuuu 网站账户，用于自动登录更新 Cookie |
 | `ADMIN_URL` | Cloudflare Secret，可选 | 邮件中的管理入口 |
 | Cookie | Durable Object 加密存储 | 网站登录凭证 |
 | 密码摘要、会话版本与会话摘要 | Durable Object 的独立认证记录 | 日常登录、会话撤销 |
 
-本地文件仅作为配置来源，不会自动随 Git 推送到云端。修改邮箱或授权码后，重新执行上传脚本。保持 Cookie 加密密钥稳定；丢失或更换后需重新提交 Cookie。
+本地文件仅作为配置来源，不会自动随 Git 推送到云端。修改邮箱或授权码后，重新执行上传脚本。网站账户 Secrets 由用户在 Cloudflare 手动设置，上传脚本不会覆盖它们。保持 Cookie 加密密钥稳定；丢失或更换后需重新提交 Cookie。
 
 ## 自动部署：Workers Builds
 
@@ -156,6 +173,7 @@ CLI 从 `.migration-secrets.json` 读取部署地址和恢复码，从已被 Git
 | `node scripts/control.mjs change-password` | 修改密码并撤销全部会话 |
 | `node scripts/control.mjs status` | 查看调度、签到与通知状态 |
 | `node scripts/control.mjs cookie` | 提交本地 Cookie 文件 |
+| `node scripts/control.mjs renew-cookie` | 使用网站账户安排自动登录更新 Cookie |
 | `node scripts/control.mjs run` | 请求当天签到，不重置预算 |
 | `node scripts/control.mjs pause` | 暂停签到 |
 | `node scripts/control.mjs resume` | 恢复签到，保留尝试次数 |
@@ -170,6 +188,9 @@ CLI 从 `.migration-secrets.json` 读取部署地址和恢复码，从已被 Git
 - HTTP 403、浏览器挑战、网络失败不会直接判定 Cookie 失效。
 - 当天最终失败保留记录并发信，次日仍按日程执行。相同 Cookie、手动运行或暂停恢复不会重置预算。
 - 更新不同 Cookie 会启动新凭证版本；当天已签到时不会再次签到。
+- 自动登录更新凭证保留当天签到次数，不能重置已耗尽的四次签到预算；网站响应主动更新 Cookie 时也保留凭证版本和次数。
+- 自动登录使用独立的四次预算，网络或服务故障等待 **10、30、100 分钟**，耗尽后发邮件并等待 24 小时再尝试。密码错误、验证码或二次验证要求立即停止自动登录，保留原 Cookie。
+- 暂停签到时不执行自动登录；不配置网站账户时沿用手动更新流程。管理页面的 7 天会话与网站 Cookie 独立，管理会话退出不影响 Alarm。
 - 邮件临时失败后等待 **1、5、30 分钟**，最多四次；认证或地址永久错误结束通知任务。
 - 剩余流量刷新独立于签到成功状态，读取失败不会重复签到。
 
@@ -197,4 +218,4 @@ npm run check
 
 测试覆盖纯函数、SMTP 协议、真实 Workers 运行时的 SQLite、Alarm、对象驱逐与隔离、密码与恢复码、全部会话撤销、后台调度隔离、退避和域名解析。无需在测试中配置真实邮箱、Cookie 或日常密码。
 
-相关文档：[架构与迁移](docs/cloudflare-migration-plan.md) · [域名实测记录](docs/cloudflare-domain-probe-results.md) · [Workers Builds 官方说明](https://developers.cloudflare.com/workers/ci-cd/builds/)。
+相关文档：[自动登录与 Cookie 更新](docs/automatic-cookie-renewal.md) · [架构与迁移](docs/cloudflare-migration-plan.md) · [域名实测记录](docs/cloudflare-domain-probe-results.md) · [Workers Builds 官方说明](https://developers.cloudflare.com/workers/ci-cd/builds/)。

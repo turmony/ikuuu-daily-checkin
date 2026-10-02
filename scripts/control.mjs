@@ -59,8 +59,8 @@ else if(command==='login') {
     result=(await request('auth/change-password',{currentPassword:await password('当前密码','ADMIN_PASSWORD'),newPassword:await password('新密码','ADMIN_NEW_PASSWORD')})).data;
     await removeSession();
   } else {
-    const actions=['status','run','pause','resume','cookie','initialize','test-email'];
-    if(!actions.includes(command))throw new Error('命令：auth-status、login、logout、recover、change-password、status、run、pause、resume、cookie、initialize、test-email');
+    const actions=['status','run','pause','resume','cookie','renew-cookie','initialize','test-email'];
+    if(!actions.includes(command))throw new Error('命令：auth-status、login、logout、recover、change-password、status、run、pause、resume、cookie、renew-cookie、initialize、test-email');
     let body;
     if(command==='cookie')body={cookie:(await readFile(process.argv[3] || 'ikuuu-cookie.txt','utf8')).trim()};
     else if(command==='initialize')body=JSON.parse(await readFile(process.argv[3] || '.github/ikuuu-state.json','utf8'));

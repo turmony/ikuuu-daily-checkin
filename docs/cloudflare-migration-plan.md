@@ -30,6 +30,8 @@ Cookie 明确失效时阻止签到，不继续耗尽四次；网络失败、HTTP
 
 到期提醒独立安排在 expire_in 前 24 小时。expire_in 是网站标记，不取代实际登录状态判断。失败通知、失效通知和恢复通知分别去重。当天成功后更新 Cookie 不会再次签到。
 
+后续增加可选的账户自动登录：配置 `IKUUU_EMAIL` / `IKUUU_PASSWORD` Secrets 后，到期前 24 小时尝试换新，明确失效时安排恢复；自动更新迁移当天签到次数，不重置已耗尽预算。登录具有独立退避与失败通知，遇到验证码或二次验证停止自动尝试；未配置账户时沿用上述手动流程。接口证据、配置与限制见 [自动登录与 Cookie 更新](automatic-cookie-renewal.md)。
+
 ## 3. 状态、并发和中断恢复
 
 一个实体账号对应一个固定对象，默认名 primary-account。通过 Durable Object RPC 管理。一个持久化 state 包含 encrypted credentials、daily runs、jobs、notices、domain publication、events；使用 SQLite 后端的 KV API。
