@@ -16,7 +16,7 @@ flowchart LR
     Object --> Alarm
 ```
 
-管理页面：https://ikuuu-daily-checkin.turmony.workers.dev。无需购买域名或配置 Email Routing。因域名发布页已实测可获取主要和备用域名，不保留查询域名的邮件收发，也不配置 IMAP。
+管理页面：https://your-worker.your-subdomain.workers.dev。无需购买域名或配置 Email Routing。因域名发布页已实测可获取主要和备用域名，不保留查询域名的邮件收发，也不配置 IMAP。
 
 SQLite Durable Objects 支持 Workers 免费计划。单账号每天少量 HTTP、存储及 Alarm 调用适合现有免费额度，额度仍与同账号其他应用共享。SMTP 使用已有邮箱账号。
 
@@ -68,7 +68,7 @@ SMTP Secret 通过 Wrangler 标准输入上传。Cookie 使用 AES-GCM 加密，
 6. 2026-10-02 云端首次签到成功，领取 1796 MB，剩余 41.08 GB。下次签到已持久化为 2026-10-03 08:17 北京时间。
 7. 删除旧 checkin workflow 与 Node/IMAP 入口，添加 Cloudflare checks CI；提交并推送迁移代码。部署验证和 CI 结果见最终迁移说明。
 
-本机直连 workers.dev 出现 DNS 与连接异常，使用已有系统代理 127.0.0.1:7897 后管理接口正常。本地网络情况不影响 Cloudflare 侧 Alarm。Wrangler 日志和 Traces 已启用。
+本机直连 workers.dev 出现 DNS 与连接异常，使用已有系统代理 本机代理地址 后管理接口正常。本地网络情况不影响 Cloudflare 侧 Alarm。Wrangler 日志和 Traces 已启用。
 
 ## 7. 回滚与维护
 

@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ikuuu-daily-checkin",
-  "account_id": "6d9ccd92ebbf3579d01cb8e0e7dcfef1",
   "main": "src/worker.js",
   "compatibility_date": "2026-10-02",
   "workers_dev": true,
@@ -11,8 +10,6 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CheckinObject"] }],
   "vars": {
     "ACCOUNT_NAME": "primary-account",
-    "NOTIFY_TO": "user@example.com",
-    "ADMIN_URL": "https://ikuuu-daily-checkin.turmony.workers.dev",
     "DEFAULT_DOMAIN": "ikuuu.top"
   },
   "observability": { "enabled": true, "traces": {"enabled": true} }

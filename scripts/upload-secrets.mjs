@@ -16,6 +16,13 @@ try {smtp=JSON.parse(await readFile('smtp.local.json','utf8'));}
 catch {throw new Error('smtp.local.json 无法读取或不是有效 JSON，请在本地检查格式');}
 if(!smtp.password?.trim() || smtp.port!==465 || !/^[a-z0-9.-]+$/i.test(smtp.host) || !/^[^\s<>@]+@[^\s<>@]+\.[a-z]+$/i.test(smtp.user)) throw new Error('请填写有效 SMTP 地址、465 端口、发件邮箱和授权码');
 const secrets={ADMIN_TOKEN:local.ADMIN_TOKEN,COOKIE_ENCRYPTION_KEY:local.COOKIE_ENCRYPTION_KEY,SMTP_HOST:smtp.host,SMTP_PORT:String(smtp.port),MAIL_USER:smtp.user,MAIL_APP_PASSWORD:smtp.password.trim()};
+secrets.NOTIFY_TO=smtp.to || smtp.user;
+if(!/^[^\s<>@]+@[^\s<>@]+\.[a-z]+$/i.test(secrets.NOTIFY_TO)) throw new Error('收件地址格式无效');
+if(local.WORKER_URL) {
+  let url;try {url=new URL(local.WORKER_URL);}catch {throw new Error('WORKER_URL 格式无效');}
+  if(url.protocol!=='https:' || url.username || url.password) throw new Error('WORKER_URL 必须是不含凭证的 HTTPS 地址');
+  secrets.ADMIN_URL=url.origin;
+}
 const child=spawn(process.execPath,['node_modules/wrangler/bin/wrangler.js','secret','bulk'],{stdio:['pipe','inherit','inherit']});
 child.stdin.on('error',()=>{});
 child.stdin.end(JSON.stringify(secrets));

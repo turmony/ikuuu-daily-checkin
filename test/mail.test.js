@@ -24,7 +24,7 @@ function server(fail) {
 test('SMTP uses TLS, authenticates and sends UTF-8 MIME safely',async()=>{
   const mock=server();
   const id=await sendNotification(env,{subject:'签到失败\r\nBcc: other@test.com',text:'Cookie 已失效'},mock.connect);
-  assert.match(id,/@126\.com$/);
+  assert.match(id,/@example\.com$/);
   const data=mock.writes.at(-1);
   assert.match(data,/Content-Transfer-Encoding: base64/);
   assert.ok(data.endsWith('\r\n.\r\n'));

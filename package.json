@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "build": "npm test && npm run check",
     "run": "node scripts/control.mjs",
     "test": "npm run test:core && npm run test:runtime",
     "test:core": "node --test test/core.test.js test/mail.test.js",
