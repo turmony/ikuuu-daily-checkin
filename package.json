@@ -9,7 +9,7 @@
     "build": "npm test && npm run check",
     "run": "node scripts/control.mjs",
     "test": "npm run test:core && npm run test:runtime",
-    "test:core": "node --test test/core.test.js test/mail.test.js test/extension.test.js",
+    "test:core": "node --test test/core.test.js test/mail.test.js",
     "test:runtime": "vitest run",
     "check": "wrangler deploy --dry-run --outdir .wrangler/build"
   },

@@ -6,7 +6,6 @@ const decode = value => Uint8Array.from(atob(value),c=>c.charCodeAt(0));
 const encoder = new TextEncoder();
 const ITERATIONS = 100_000;
 export const SESSION_MS = 7 * 86_400_000;
-const newToken = () => encode(crypto.getRandomValues(new Uint8Array(32))).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 
 function validPassword(value) {
   if(typeof value!=='string' || value.length<6 || value.length>128 || !value.trim()) {
@@ -38,9 +37,7 @@ async function verifyPassword(password, record, pepper) {
 export class AuthManager {
   constructor(storage,env,{now=Date.now}={}) {this.storage=storage;this.env=env;this.now=now;}
   async load() {
-    const state=await this.storage.get('auth') || {schema:1,password:null,version:0,sessions:[],failures:{}};
-    state.devices ||= [];
-    return state;
+    return await this.storage.get('auth') || {schema:1,password:null,version:0,sessions:[],failures:{}};
   }
   prune(state) {
     state.sessions=state.sessions.filter(s=>s.expiresAt>this.now() && s.version===state.version);
@@ -77,7 +74,7 @@ export class AuthManager {
     if(!state.password) throw new InputError('请先使用恢复码设置密码',409);
     if(!await verifyPassword(password,state.password,this.env.ADMIN_TOKEN)) return this.fail(state,key,'密码不正确');
     this.prune(state);delete state.failures[key];
-    const token=newToken();
+    const token=encode(crypto.getRandomValues(new Uint8Array(32))).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
     const expiresAt=this.now()+SESSION_MS;
     state.sessions=state.sessions.slice(-19);
     state.sessions.push({hash:await fingerprint(token),version:state.version,expiresAt});
@@ -89,7 +86,7 @@ export class AuthManager {
     this.guard(state,key);
     if(typeof code!=='string' || code.length>256 || !await authorized(`Bearer ${code}`,this.env.ADMIN_TOKEN)) return this.fail(state,key,'恢复码不正确');
     const record=await hashPassword(password,this.env.ADMIN_TOKEN);
-    state.password=record;state.version++;state.sessions=[];state.devices=[];delete state.failures[key];
+    state.password=record;state.version++;state.sessions=[];delete state.failures[key];
     state.passwordChangedAt=this.now();
     // Auth is separate from scheduler storage; no writes to state or Alarm here.
     await this.storage.put('auth',state);
@@ -100,7 +97,7 @@ export class AuthManager {
     this.guard(state,key);
     if(!await verifyPassword(currentPassword,state.password,this.env.ADMIN_TOKEN)) return this.fail(state,key,'当前密码不正确',400);
     state.password=await hashPassword(newPassword,this.env.ADMIN_TOKEN);
-    state.version++;state.sessions=[];state.devices=[];delete state.failures[key];state.passwordChangedAt=this.now();
+    state.version++;state.sessions=[];delete state.failures[key];state.passwordChangedAt=this.now();
     await this.storage.put('auth',state);
     return {message:'密码已修改，全部登录会话已失效，请重新登录'};
   }
@@ -108,46 +105,5 @@ export class AuthManager {
     const state=await this.load();const session=await this.session(state,token);
     if(session) {state.sessions=state.sessions.filter(s=>s.hash!==session.hash);await this.storage.put('auth',state);}
     return {message:'已退出登录'};
-  }
-
-  async listDevices() {
-    const state=await this.load();
-    return {devices:state.devices.filter(device=>device.version===state.version).map(({id,name,createdAt,lastSyncAt})=>({id,name,createdAt,lastSyncAt:lastSyncAt || null}))};
-  }
-
-  async pairDevice(name='浏览器扩展') {
-    if (typeof name!=='string' || !name.trim() || name.length>64) throw new InputError('设备名称须为 1–64 个字符');
-    const state=await this.load();
-    state.devices=state.devices.filter(device=>device.version===state.version);
-    if (state.devices.length>=10) throw new InputError('最多配对 10 个扩展，请先撤销不使用的设备');
-    const token='sync_'+newToken(),id=crypto.randomUUID();
-    const device={id,name:name.trim(),hash:await fingerprint(token),version:state.version,createdAt:this.now()};
-    state.devices.push(device);
-    await this.storage.put('auth',state);
-    return {id,name:device.name,token,message:'配对令牌仅显示本次，请填入浏览器扩展。它只能同步 Cookie。'};
-  }
-
-  async revokeDevice(id) {
-    if (typeof id!=='string') throw new InputError('设备编号无效');
-    const state=await this.load();
-    state.devices=state.devices.filter(device=>device.id!==id);
-    await this.storage.put('auth',state);
-    return {message:'已撤销扩展配对'};
-  }
-
-  async requireDevice(token) {
-    if (typeof token!=='string' || !/^sync_[A-Za-z0-9_-]{43}$/.test(token)) throw new InputError('扩展配对令牌无效，请重新配对',401);
-    const state=await this.load(),hash=await fingerprint(token);
-    const device=state.devices.find(device=>device.version===state.version && crypto.subtle.timingSafeEqual(encoder.encode(device.hash),encoder.encode(hash)));
-    if (!device) throw new InputError('扩展配对已失效，请重新配对',401);
-    if (device.lastAttemptAt && this.now()-device.lastAttemptAt<5_000) throw new InputError('同步过于频繁，请稍后重试',429);
-    device.lastAttemptAt=this.now();
-    await this.storage.put('auth',state);
-    return device;
-  }
-
-  async recordDeviceSync(id) {
-    const state=await this.load(),device=state.devices.find(device=>device.id===id && device.version===state.version);
-    if (device) {device.lastSyncAt=this.now();await this.storage.put('auth',state);}
   }
 }

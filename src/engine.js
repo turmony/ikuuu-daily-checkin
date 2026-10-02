@@ -1,7 +1,7 @@
-import {cookieEntries, cookieExpiry, normalizeDomain, shanghaiDate} from './core.js';
+import {cookieExpiry, normalizeDomain, shanghaiDate} from './core.js';
 import {createClient, SiteError} from './client.js';
 import {decryptCookie, encryptCookie, fingerprint} from './security.js';
-import {DAY_MS, MAIL_DELAYS_MS, nextDaily, retryAt, dayEnds} from './schedule.js';
+import {MAIL_DELAYS_MS, nextDaily, retryAt, dayEnds} from './schedule.js';
 import {sendNotification, mailConfigured} from './mail.js';
 
 export class InputError extends Error {
@@ -25,36 +25,6 @@ export class CheckinEngine {
       schema:1, enabled:true, blocked:false, currentDomain:normalizeDomain(this.env.DEFAULT_DOMAIN || 'ikuuu.top'),
       credentials:null, lastSuccessDate:null, runs:{}, jobs:[], notices:[], events:[], publication:null,
     };
-    this.state.autoLogin ||= {status:'idle',attempts:0};
-  }
-
-  loginConfigured() {
-    return this.state?.credentialMode!=='browser' && typeof this.env.IKUUU_EMAIL === 'string' && !!this.env.IKUUU_EMAIL.trim() &&
-      typeof this.env.IKUUU_PASSWORD === 'string' && !!this.env.IKUUU_PASSWORD;
-  }
-
-  scheduleLogin(reason, due = this.now()) {
-    if (!this.loginConfigured() || !this.state.enabled ||
-      ['manual_required','invalid_credentials'].includes(this.state.autoLogin.status)) return false;
-    const existing=this.state.jobs.find(job=>job.type==='login');
-    if (existing) {
-      if (reason==='expired' && existing.attempts===0 && existing.reason==='renewal' && !existing.cooldown) {
-        existing.reason=reason;existing.due=this.now();this.state.autoLogin.reason=reason;
-      }
-      return false;
-    }
-    this.state.autoLogin = {...this.state.autoLogin,status:'pending',attempts:0,reason};
-    this.putJob({id:'login',type:'login',reason,version:this.state.credentials?.version || 0,attempts:0,due});
-    return true;
-  }
-
-  ensureLogin() {
-    if (!this.loginConfigured()) {
-      this.state.jobs = this.state.jobs.filter(job=>job.type!=='login');
-      return;
-    }
-    if (!this.state.credentials || this.state.blocked) this.scheduleLogin(this.state.credentials ? 'expired' : 'initial');
-    else this.scheduleLogin('renewal',Math.max(this.now(),this.state.credentials.expiry*1000-DAY_MS));
   }
 
   event(message) {
@@ -77,7 +47,6 @@ export class CheckinEngine {
   }
 
   async save() {
-    this.ensureLogin();
     this.ensureDaily();
     const cutoff = shanghaiDate(new Date(this.now() - 90 * 86_400_000));
     for (const date of Object.keys(this.state.runs)) if (date < cutoff) delete this.state.runs[date];
@@ -129,10 +98,9 @@ export class CheckinEngine {
     this.state.credentials = {encrypted, fingerprint:hash, version:(previousVersion || 0) + 1, expiry, verified, updatedAt:this.now()};
     this.state.lastCookieUpdate = this.now();
     this.state.blocked = false;
-    this.state.autoLogin = {...this.state.autoLogin,status:'idle',attempts:0,lastError:null};
-    this.state.jobs = this.state.jobs.filter(job => !['run','expiry','refresh','login'].includes(job.type));
+    this.state.jobs = this.state.jobs.filter(job => !['run','expiry','refresh'].includes(job.type));
     for (const notice of this.state.notices) {
-      if (notice.version === previousVersion && ['cookie','expiry','failed','auto-login'].includes(notice.type) && notice.status === 'pending') {
+      if (notice.version === previousVersion && ['cookie','expiry','failed'].includes(notice.type) && notice.status === 'pending') {
         notice.status = 'superseded';
         this.dropJob(`mail:${notice.key}`);
       }
@@ -165,47 +133,19 @@ export class CheckinEngine {
 
   async runNow() {
     await this.load();
+    if (!this.state.credentials) throw new InputError('请先更新 Cookie');
+    if (this.state.blocked) throw new InputError('Cookie 已失效，请更新后恢复');
     if (!this.state.enabled) throw new InputError('签到已暂停，请先恢复');
-    if (!this.state.credentials || this.state.blocked) {
-      if (!this.loginConfigured()) throw new InputError('请先更新 Cookie，或配置自动登录账户');
-      if (['manual_required','invalid_credentials'].includes(this.state.autoLogin.status)) throw new InputError(this.state.autoLogin.lastError || '自动登录需要人工处理');
-      this.scheduleLogin(this.state.credentials ? 'expired' : 'initial');
-      await this.save();
-      return this.snapshot('已安排自动登录，成功后继续当天未完成的签到');
-    }
     const queued = this.queueRun();
     await this.save();
     return this.snapshot(queued ? '已安排当天签到' : '当天已完成、已有任务或重试已耗尽');
-  }
-
-  async renewCookie() {
-    await this.load();
-    if (this.state.credentialMode==='browser') throw new InputError('已启用浏览器同步，请在配对浏览器中登录网站以自动更新 Cookie');
-    if (!this.loginConfigured()) throw new InputError('请在 Cloudflare 配置 IKUUU_EMAIL 和 IKUUU_PASSWORD');
-    if (!this.state.enabled) throw new InputError('签到已暂停，请先恢复');
-    const existing=this.state.jobs.find(job=>job.type==='login');
-    if (existing) {
-      if (existing.reason==='renewal' && existing.attempts===0 && !existing.cooldown) {
-        if (this.state.autoLogin.lastAttemptAt && this.now()-this.state.autoLogin.lastAttemptAt<60_000) throw new InputError('请等待 1 分钟再尝试自动登录',429);
-        existing.reason='manual';existing.due=this.now();this.state.autoLogin.reason='manual';
-        await this.save();
-        return this.snapshot('已安排立即自动登录并更新 Cookie');
-      }
-      return this.snapshot('自动登录任务已安排，请等待完成');
-    }
-    if (this.state.autoLogin.lastAttemptAt && this.now()-this.state.autoLogin.lastAttemptAt<60_000) throw new InputError('请等待 1 分钟再尝试自动登录',429);
-    this.state.autoLogin.status='idle';
-    this.scheduleLogin('manual');
-    await this.save();
-    return this.snapshot('已安排自动登录并更新 Cookie');
   }
 
   async pause(paused) {
     await this.load();
     this.state.enabled = !paused;
     if (paused) {
-      this.state.jobs = this.state.jobs.filter(job => !['daily','run','refresh','login'].includes(job.type));
-      if (['pending','retrying','running'].includes(this.state.autoLogin.status)) this.state.autoLogin.status='idle';
+      this.state.jobs = this.state.jobs.filter(job => !['daily','run','refresh'].includes(job.type));
       for (const run of Object.values(this.state.runs)) if (['pending','running','retrying'].includes(run.status)) run.status = 'paused';
     } else {
       const date=shanghaiDate(new Date(this.now()));
@@ -235,132 +175,10 @@ export class CheckinEngine {
       notices:state.notices.map(({key,type,at,status,attempts,lastError,messageId})=>({key,type,at,status,attempts,lastError,messageId})).slice(-30),
       history:Object.values(state.runs).sort((a,b)=>b.date.localeCompare(a.date)), events:state.events.slice(-50),
       publication:state.publication, mailConfigured:mailConfigured(this.env),
-      autoLogin:{...state.autoLogin,configured:this.loginConfigured(),nextAttemptAt:state.jobs.find(job=>job.type==='login')?.due || null},
-      credentialMode:state.credentialMode || 'automatic',browserSync:state.browserSync || null,
     };
   }
 
-  async status() {
-    await this.load();
-    const jobs=JSON.stringify(this.state.jobs);
-    this.ensureLogin();this.ensureDaily();
-    if (JSON.stringify(this.state.jobs)!==jobs) await this.save();
-    return this.snapshot();
-  }
-
-  async useBrowserSync() {
-    await this.load();
-    this.state.credentialMode='browser';
-    this.state.jobs=this.state.jobs.filter(job=>job.type!=='login');
-    this.state.autoLogin={...this.state.autoLogin,status:'idle',lastError:null};
-    await this.save();
-  }
-
-  async syncCookie({cookie:raw,domain:host,reason},deviceId) {
-    await this.load();
-    if (typeof raw!=='string' || !raw.trim() || raw.length>16_384 || /[\r\n]/.test(raw)) throw new InputError('Cookie 格式无效',422);
-    let domain,expiry;
-    try {domain=normalizeDomain(host);expiry=cookieExpiry(raw);} catch {throw new InputError('网站域名或 Cookie 到期标记无效',422);}
-    const cookie=raw.trim(),entries=cookieEntries(cookie);
-    if (!entries.get('uid') || !entries.get('key') || expiry*1000<=this.now()) throw new InputError('网站尚未登录或 Cookie 已过期',422);
-    if (this.state.credentials) {
-      const previous=cookieEntries(await decryptCookie(this.state.credentials.encrypted,this.env.COOKIE_ENCRYPTION_KEY));
-      if (previous.get('uid') && previous.get('uid')!==entries.get('uid')) throw new InputError('浏览器账号与当前签到账户不一致，未替换 Cookie',409);
-      if (expiry<this.state.credentials.expiry && this.state.credentials.expiry*1000>this.now()) throw new InputError('浏览器 Cookie 比当前凭证旧，请重新登录网站',409);
-    }
-    try {
-      if (domain===this.state.currentDomain) await this.client.account(domain,cookie);
-      else await this.client.verifyDomain(domain,cookie);
-    } catch (error) {
-      if (error.kind==='cookie') throw new InputError('新 Cookie 未通过登录验证，原凭证已保留',422);
-      throw new InputError('云端暂时无法验证网站登录，原凭证已保留，请稍后重试',503);
-    }
-    const hash=await fingerprint(cookie),changed=this.state.credentials?.fingerprint!==hash;
-    await this.installVerifiedCookie(cookie,expiry,{hash,domain});
-    this.state.credentialMode='browser';
-    this.state.browserSync={at:this.now(),domain,deviceId,reason:['login','change','startup','manual'].includes(reason)?reason:'change'};
-    this.state.autoLogin={...this.state.autoLogin,status:'idle',lastError:null};
-    this.event(changed?'已同步并验证浏览器 Cookie':'已在网站登录后重新验证并同步 Cookie');
-    await this.save();
-    return {ok:true,changed,syncedAt:this.state.browserSync.at,domain,expiry,message:'Cookie 已同步，当天未完成的签到将按现有预算继续'};
-  }
-
-  async installVerifiedCookie(cookie,expiry,{hash,domain=this.state.currentDomain}={}) {
-    hash ||= await fingerprint(cookie);
-    const previousVersion=this.state.credentials?.version || 0;
-    const changed=this.state.credentials?.fingerprint!==hash;
-    const version=changed?previousVersion+1:previousVersion;
-    const encrypted=changed?await encryptCookie(cookie,this.env.COOKIE_ENCRYPTION_KEY):this.state.credentials.encrypted;
-    this.state.credentials={encrypted,fingerprint:hash,version,expiry,verified:true,updatedAt:this.now()};
-    this.state.currentDomain=domain;this.state.blocked=false;this.dropJob('login');
-    const today=shanghaiDate(new Date(this.now())),run=this.state.runs[today];
-    for (const pending of this.state.jobs) if (['run','refresh'].includes(pending.type) && pending.version===previousVersion) pending.version=version;
-    if (run?.version===previousVersion) {
-      run.version=version;
-      if (run.status==='blocked_cookie' && run.attempts<4 && this.state.lastSuccessDate!==today) {
-        run.status=this.state.enabled?'retrying':'paused';run.nextAttemptAt=this.now();
-        if (this.state.enabled) this.putJob({id:`run:${today}`,type:'run',date:today,version,due:this.now()});
-      } else if (run.status==='blocked_cookie') run.status='failed';
-    }
-    for (const notice of this.state.notices) {
-      if (notice.version===previousVersion && ['cookie','expiry','auto-login'].includes(notice.type) && notice.status==='pending') {
-        notice.status='superseded';this.dropJob(`mail:${notice.key}`);
-      }
-    }
-    this.putJob({id:'expiry',type:'expiry',version,due:Math.max(this.now(),expiry*1000-DAY_MS)});
-    this.queueRun();
-  }
-
-  async rotateCookie(raw) {
-    if (!raw || !this.state.credentials) return;
-    let expiry;
-    try { expiry=cookieExpiry(raw); } catch { return; }
-    const hash=await fingerprint(raw);
-    if (hash===this.state.credentials.fingerprint) return;
-    this.state.credentials={...this.state.credentials,encrypted:await encryptCookie(raw,this.env.COOKIE_ENCRYPTION_KEY),fingerprint:hash,expiry,verified:true,updatedAt:this.now()};
-    this.putJob({id:'expiry',type:'expiry',version:this.state.credentials.version,due:Math.max(this.now(),expiry*1000-DAY_MS)});
-    // Passive renewal keeps the existing run and its attempt budget intact.
-    const login=this.state.jobs.find(job=>job.type==='login');
-    if (login?.reason==='renewal' && login.attempts===0 && !login.cooldown) this.dropJob(login.id);
-  }
-
-  async performLogin(job) {
-    if (!this.loginConfigured() || !this.state.enabled || job.version!==(this.state.credentials?.version || 0)) {
-      this.dropJob(job.id);await this.save();return;
-    }
-    const interrupted=job.running;
-    if (!interrupted) job.attempts++;
-    job.running=true;job.due=this.now()+RECOVERY_MS;
-    this.state.autoLogin={...this.state.autoLogin,status:'running',attempts:job.attempts,reason:job.reason,lastAttemptAt:this.now()};
-    await this.save();
-    try {
-      if (interrupted) throw new SiteError('network','上次自动登录执行中断，按退避恢复');
-      const result=await this.client.login(this.state.currentDomain,this.env.IKUUU_EMAIL.trim(),this.env.IKUUU_PASSWORD);
-      const expiry=cookieExpiry(result.cookie);
-      // Near-expired responses must not create an immediate, unbounded login loop.
-      if (expiry*1000<=this.now()+DAY_MS) throw new SiteError('response','网站新 Cookie 有效期不足 24 小时，保留原凭证并稍后重试');
-      await this.installVerifiedCookie(result.cookie,expiry);
-      this.state.autoLogin={status:'success',attempts:job.attempts,reason:job.reason,lastAttemptAt:this.state.autoLogin.lastAttemptAt,lastSuccessAt:this.now(),lastError:null};
-      this.event('已自动登录并验证新 Cookie');
-      await this.save();
-    } catch (error) {
-      const permanent=['login','verification','cookie'].includes(error.kind);
-      const message=error.kind ? error.message : '自动登录发生异常，请检查服务配置';
-      this.state.autoLogin.lastError=message;
-      job.running=false;
-      const delay=[10,30,100][job.attempts-1];
-      if (!permanent && delay!==undefined) {
-        this.state.autoLogin.status='retrying';job.due=this.now()+Math.max(delay*60_000,error.retryAfterMs || 0);this.putJob(job);
-      } else {
-        this.dropJob(job.id);
-        this.state.autoLogin.status=error.kind==='verification' ? 'manual_required' : permanent ? 'invalid_credentials' : 'failed';
-        this.notice('auto-login','iKuuu 自动登录未完成',`${message}\n原 Cookie 已保留。请在管理页面检查状态；需要验证时手动登录网站并更新 Cookie。`);
-        if (!permanent) this.putJob({id:'login',type:'login',reason:job.reason,version:job.version,attempts:0,cooldown:true,due:this.now()+DAY_MS});
-      }
-      this.event(`自动登录：${this.state.autoLogin.status}`);
-      await this.save();
-    }
-  }
+  async status() { await this.load(); return this.snapshot(); }
 
   async testEmail() {
     await this.load();
@@ -403,14 +221,12 @@ export class CheckinEngine {
     await this.save(); // Persist recovery before issuing an external request.
     try {
       if(interrupted) throw new SiteError('network','上次执行中断，按既定退避恢复');
-      let cookie = await decryptCookie(this.state.credentials.encrypted, this.env.COOKIE_ENCRYPTION_KEY);
+      const cookie = await decryptCookie(this.state.credentials.encrypted, this.env.COOKIE_ENCRYPTION_KEY);
       if (run.attempts >= 2 && ['network','domain','server'].includes(run.errorKind) && !run.discoveryTried) {
         run.discoveryTried = true;
         await this.recoverDomain(cookie);
       }
-      const account=await this.client.account(this.state.currentDomain, cookie);
-      await this.rotateCookie(account.cookie);
-      cookie=account.cookie || cookie;
+      await this.client.account(this.state.currentDomain, cookie);
       this.state.credentials.verified = true;
       const result = await this.client.checkin(this.state.currentDomain, cookie);
       run.status = 'success'; run.completedAt = this.now(); run.gained = result.gained; run.result = result.status;
@@ -419,20 +235,16 @@ export class CheckinEngine {
       this.dropJob(job.id);
       this.putJob({id:`refresh:${today}`,type:'refresh',date:today,version:job.version,attempts:0,due:this.now()});
       this.event(`签到已完成，尝试次数 ${run.attempts}`);
-      if (this.state.notices.some(notice=>['cookie','auto-login'].includes(notice.type) && notice.status === 'sent' && notice.version < job.version)) {
+      if (this.state.notices.some(notice=>notice.type === 'cookie' && notice.status === 'sent' && notice.version < job.version)) {
         this.notice('recovered','iKuuu 签到已恢复',`今日签到完成，领取：${result.gained || '未知（网站已签到）'}`,today);
       }
       await this.save(); // Success stays durable even if traffic refresh fails.
-      try { await this.rotateCookie(result.cookie); await this.save(); }
-      catch { this.event('签到成功，响应 Cookie 暂未保存'); }
     } catch (error) {
       run.lastError = error.kind ? error.message : '执行异常，请检查服务配置和日志';
       run.errorKind = error.kind || 'internal';
       if (error.kind === 'cookie') {
         run.status = 'blocked_cookie'; this.state.blocked = true; this.dropJob(job.id);
-        if (!this.loginConfigured() || ['manual_required','invalid_credentials'].includes(this.state.autoLogin.status)) {
-          this.notice('cookie','iKuuu Cookie 已失效',`${run.lastError}\n本轮已停止，请更新 Cookie；更新后会恢复当天未完成的签到。`,today);
-        } else this.scheduleLogin('expired');
+        this.notice('cookie','iKuuu Cookie 已失效',`${run.lastError}\n本轮已停止，请更新 Cookie；更新后会恢复当天未完成的签到。`,today);
       } else {
         const due = retryAt(this.now(),run.attempts,today,error.retryAfterMs);
         if (due) {
@@ -473,7 +285,6 @@ export class CheckinEngine {
       const cookie=await decryptCookie(this.state.credentials.encrypted,this.env.COOKIE_ENCRYPTION_KEY);
       const account=await this.client.account(this.state.currentDomain,cookie);
       const run=this.state.runs[job.date]; if(run) run.remaining=account.remaining;
-      await this.rotateCookie(account.cookie);
     } catch {
       job.attempts++;
       if (job.attempts <= 2 && this.now()+60_000 < dayEnds(job.date)) {job.due=this.now()+60_000;this.putJob(job);}
@@ -489,13 +300,12 @@ export class CheckinEngine {
         const job=this.state.jobs.filter(item=>item.due<=this.now()).sort((a,b)=>a.due-b.due)[0];
         if(!job) break;
         if(job.type==='run') await this.performRun(job);
-        else if(job.type==='login') await this.performLogin(job);
         else if(job.type==='mail') await this.performMail(job);
         else if(job.type==='refresh') await this.refresh(job);
         else {
           this.dropJob(job.id);
           if(job.type==='daily') this.queueRun();
-          if(job.type==='expiry' && job.version===this.state.credentials?.version && !this.state.blocked && !this.loginConfigured()) {
+          if(job.type==='expiry' && job.version===this.state.credentials?.version && !this.state.blocked) {
             const date=new Date(this.state.credentials.expiry*1000).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'});
             this.notice('expiry','iKuuu Cookie 到期提醒',`Cookie 到期标记：${date}（北京时间）。请更新凭证；是否失效以实际登录验证为准。`);
           }

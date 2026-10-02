@@ -6,10 +6,8 @@
 
 - 每天北京时间 **08:17** 自动签到。
 - 首次失败后依次等待 **10、30、100 分钟**，最多四次尝试。
-- **推荐浏览器扩展自动同步 Cookie**：登录网站后自动更新一次，即使 Cookie 未变化；登录凭证变化时也会同步。
-- 验证码、邮箱或二次验证由用户在网站正常完成，无需复制 Cookie、付费打码或 AI 服务。
-- 独立的可撤销扩展令牌，不受管理页面 7 天会话到期影响。浏览器关闭时云端继续签到。
-- 保留密码自动登录和手动 Cookie 更新入口；签到成功后记录领取量和剩余流量。
+- Cookie 明确失效时停止签到并通知；更新后恢复当天未完成的任务。
+- 到期前 24 小时提醒，签到成功后记录领取量和剩余流量。
 - 从 `https://ikuuu.win/` 发现并验证候选域名。
 - SMTP 通知独立重试，管理页面支持密码登录、恢复码重置、查询状态、更新 Cookie、暂停和恢复。
 - GitHub CI 检查与 Cloudflare Workers Builds 自动部署。
@@ -84,7 +82,7 @@ node scripts/upload-secrets.mjs
 
 打开部署地址，使用 `.migration-secrets.json` 中的 `ADMIN_TOKEN` 作为恢复码，首次设置 **6–128 个字符**的密码，再用密码登录。原有部署的管理令牌自动成为恢复码，不再用于日常登录。
 
-忘记密码时，可在登录页面展开恢复入口，用恢复码设置新密码。已登录时可在管理页面输入当前密码修改密码。**修改或重置完成后，所有已登录会话和扩展配对立即失效，需要重新登录与配对；后台签到和邮件调度继续运行。**
+忘记密码时，可在登录页面展开恢复入口，用恢复码设置新密码。已登录时可在管理页面输入当前密码修改密码。**修改或重置完成后，所有设备的已登录会话立即失效，需要重新登录；后台签到和邮件调度继续运行。**
 
 CLI 用户也可以交互设置和登录，密码输入不会回显原文：
 
@@ -102,18 +100,13 @@ node scripts/control.mjs test-email
 node scripts/control.mjs status
 ```
 
-确认收件箱收到测试邮件后，使用免费的浏览器扩展方案：
+确认收件箱收到测试邮件，再将网站登录后的完整 Cookie 保存至项目根目录的 `ikuuu-cookie.txt`，执行：
 
-1. 更新并部署本仓库 Worker。登录管理页面，在“浏览器扩展自动同步”中填写设备名称，生成配对令牌。
-2. Chrome 打开 `chrome://extensions`，Edge 打开 `edge://extensions`，启用“开发者模式”，选择“加载已解压的扩展程序”，选中仓库的 `extension` 文件夹。
-3. 点击扩展，填写 Worker 的 HTTPS 地址、配对令牌和实际使用的 iKuuu 网站地址，保存并授权访问这些地址。
-4. 在该浏览器正常登录 iKuuu，完成网站要求的验证。进入账户页面后扩展自动同步，管理页面显示“最近浏览器同步”；当天未完成的签到按原预算继续。
+```sh
+node scripts/control.mjs cookie
+```
 
-保存扩展配置时，已有有效登录也会立即同步。以后登录成功时，即使 Cookie 未变也同步一次；Cookie 变化时继续自动同步。临时失败会按 1、5、30 分钟重试，最多四次。详细安装、配对及故障处理见 [扩展使用说明](extension/README.md)。
-
-**扩展无需网站账户 Secrets。** 配对后启用浏览器同步方式，即使此前配置了 `IKUUU_EMAIL`、`IKUUU_PASSWORD`，也停止服务器密码自动登录，可自行移除这些 Secret。现有云端签到、SMTP、到期提醒继续运行。浏览器关闭后使用最后同步的 Cookie 签到；网站会话过期仍需用户正常登录一次，扩展负责自动传递新 Cookie。
-
-需要旧的密码自动登录或手动 Cookie 方式时，参见 [自动登录与 Cookie 更新](docs/automatic-cookie-renewal.md)。
+也可在已登录的管理页面更新 Cookie。当天尚未签到时会立即执行；以后按照日程运行。
 
 ## 配置说明
 
@@ -125,13 +118,11 @@ node scripts/control.mjs status
 | `NOTIFY_TO` | Cloudflare Secret | 通知收件邮箱 |
 | `ADMIN_TOKEN` | Cloudflare Secret | 首次设密及忘记密码时的恢复码 |
 | `COOKIE_ENCRYPTION_KEY` | Cloudflare Secret | 32 字节 AES-GCM 密钥的 Base64 |
-| `IKUUU_EMAIL`、`IKUUU_PASSWORD` | Cloudflare Secret，可选 | iKuuu 网站账户，用于自动登录更新 Cookie |
 | `ADMIN_URL` | Cloudflare Secret，可选 | 邮件中的管理入口 |
 | Cookie | Durable Object 加密存储 | 网站登录凭证 |
 | 密码摘要、会话版本与会话摘要 | Durable Object 的独立认证记录 | 日常登录、会话撤销 |
-| 扩展令牌摘要、设备名和同步时间 | Durable Object 的独立认证记录 | 限定 Cookie 同步权限、撤销配对 |
 
-本地文件仅作为配置来源，不会自动随 Git 推送到云端。修改邮箱或授权码后，重新执行上传脚本。网站账户 Secrets 由用户在 Cloudflare 手动设置，上传脚本不会覆盖它们。保持 Cookie 加密密钥稳定；丢失或更换后需重新提交 Cookie。
+本地文件仅作为配置来源，不会自动随 Git 推送到云端。修改邮箱或授权码后，重新执行上传脚本。保持 Cookie 加密密钥稳定；丢失或更换后需重新提交 Cookie。
 
 ## 自动部署：Workers Builds
 
@@ -165,7 +156,6 @@ CLI 从 `.migration-secrets.json` 读取部署地址和恢复码，从已被 Git
 | `node scripts/control.mjs change-password` | 修改密码并撤销全部会话 |
 | `node scripts/control.mjs status` | 查看调度、签到与通知状态 |
 | `node scripts/control.mjs cookie` | 提交本地 Cookie 文件 |
-| `node scripts/control.mjs renew-cookie` | 使用网站账户安排自动登录更新 Cookie |
 | `node scripts/control.mjs run` | 请求当天签到，不重置预算 |
 | `node scripts/control.mjs pause` | 暂停签到 |
 | `node scripts/control.mjs resume` | 恢复签到，保留尝试次数 |
@@ -180,9 +170,6 @@ CLI 从 `.migration-secrets.json` 读取部署地址和恢复码，从已被 Git
 - HTTP 403、浏览器挑战、网络失败不会直接判定 Cookie 失效。
 - 当天最终失败保留记录并发信，次日仍按日程执行。相同 Cookie、手动运行或暂停恢复不会重置预算。
 - 更新不同 Cookie 会启动新凭证版本；当天已签到时不会再次签到。
-- 浏览器同步与自动登录更新凭证保留当天签到次数，不能重置已耗尽的四次签到预算；网站响应主动更新 Cookie 时也保留凭证版本和次数。同步 Cookie 不会解除管理员暂停。
-- 自动登录使用独立的四次预算，网络或服务故障等待 **10、30、100 分钟**，耗尽后发邮件并等待 24 小时再尝试。密码错误、验证码或二次验证要求立即停止自动登录，保留原 Cookie。
-- 暂停签到时不执行自动登录；浏览器模式不执行服务器密码登录。管理页面的 7 天会话、扩展配对及网站 Cookie 彼此独立，管理会话退出不影响 Alarm 或扩展配对。
 - 邮件临时失败后等待 **1、5、30 分钟**，最多四次；认证或地址永久错误结束通知任务。
 - 剩余流量刷新独立于签到成功状态，读取失败不会重复签到。
 
@@ -194,8 +181,6 @@ CLI 从 `.migration-secrets.json` 读取部署地址和恢复码，从已被 Git
 
 - `smtp.local.json`、`.migration-secrets.json`、`.admin-session.json`、`ikuuu-cookie.txt`、`.dev.vars` 已被 Git 忽略。本地凭证与会话应限制文件权限并私密保管。
 - 管理接口不返回邮箱授权码、Cookie、密码摘要或恢复码；Cookie 使用 AES-GCM 加密，SMTP 连接使用 TLS。页面不将密码或恢复码写入浏览器存储，会话 Cookie 不可被 JavaScript 读取。
-- 扩展仅读取所授权网站 Cookie（包括 HttpOnly），只发送到所配置的 HTTPS Worker。配对令牌保存在本机扩展存储，对网站内容脚本不可见；服务端只保存摘要，生成时仅显示一次。
-- 同步先验证登录、账号 UID 和到期时间；拒绝不同账号或比当前有效凭证更旧的 Cookie。Chrome/Edge 普通窗口支持自动同步，无痕窗口不支持。
 - 同一来源连续 5 次密码或恢复码验证失败后，限制该验证入口 10 分钟。更换 Cloudflare 中的恢复码后须用新恢复码重置密码，Cookie 加密密钥应保持稳定。
 - 状态和 Alarm 在同一 SQLite 存储事务中保存；对象串行处理更新、签到与通知。签到和邮件记录保留 90 天，事件保留最近 200 条。
 - Alarm 可能因平台维护延迟。外部请求与本地状态不能原子提交，进程中断可能导致重复请求或通知，不承诺端到端恰好一次。
@@ -212,4 +197,4 @@ npm run check
 
 测试覆盖纯函数、SMTP 协议、真实 Workers 运行时的 SQLite、Alarm、对象驱逐与隔离、密码与恢复码、全部会话撤销、后台调度隔离、退避和域名解析。无需在测试中配置真实邮箱、Cookie 或日常密码。
 
-相关文档：[浏览器扩展自动同步](extension/README.md) · [自动登录与 Cookie 更新](docs/automatic-cookie-renewal.md) · [架构与迁移](docs/cloudflare-migration-plan.md) · [域名实测记录](docs/cloudflare-domain-probe-results.md) · [Workers Builds 官方说明](https://developers.cloudflare.com/workers/ci-cd/builds/)。
+相关文档：[架构与迁移](docs/cloudflare-migration-plan.md) · [域名实测记录](docs/cloudflare-domain-probe-results.md) · [Workers Builds 官方说明](https://developers.cloudflare.com/workers/ci-cd/builds/)。

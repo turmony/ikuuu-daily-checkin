@@ -32,28 +32,12 @@ export class CheckinObject extends DurableObject {
   recover(code,password,clientKey) {return this.invoke(()=>this.auth.recover(code,password,clientKey));}
   changePassword(token,current,newPassword,clientKey) {return this.invoke(()=>this.auth.change(token,current,newPassword,clientKey));}
   logout(token) {return this.invoke(()=>this.auth.logout(token));}
-  syncCookie(body,token) {
-    return this.invoke(async()=>{
-      const device=await this.auth.requireDevice(token);
-      const result=await this.engine.syncCookie(body,device.id);
-      await this.auth.recordDeviceSync(device.id);
-      return result;
-    });
-  }
   manage(action,body,token) {
     return this.invoke(async()=>{
       // Validate in the same serialized operation as the action: no stale auth cache.
       await this.auth.requireSession(token);
       if(action==='status' || action==='history') return this.engine.status();
-      if(action==='sync/devices') return this.auth.listDevices();
-      if(action==='sync/pair') {
-        const result=await this.auth.pairDevice(body.name);
-        await this.engine.useBrowserSync();
-        return result;
-      }
-      if(action==='sync/revoke') return this.auth.revokeDevice(body.id);
       if(action==='cookie') return this.engine.updateCookie(body.cookie);
-      if(action==='renew-cookie') return this.engine.renewCookie();
       if(action==='initialize') return this.engine.initialize(body);
       if(action==='run') return this.engine.runNow();
       if(action==='test-email') return this.engine.testEmail();
