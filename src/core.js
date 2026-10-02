@@ -33,7 +33,7 @@ export function domainsFromReply(text) {
 
 export function decodedUserHtml(body) {
   const match = String(body).match(/var\s+originBody\s*=\s*"([A-Za-z0-9+/=]+)"/);
-  return match ? Buffer.from(match[1], 'base64').toString('utf8') : String(body);
+  return match ? new TextDecoder().decode(Uint8Array.from(atob(match[1]), char => char.charCodeAt(0))) : String(body);
 }
 
 export function remainingTraffic(body) {

@@ -3,3 +3,9 @@ ikuuu-cookie.txt
 node_modules/
 .env
 .env.local
+.dev.vars
+.dev.vars.*
+.wrangler/
+coverage/
+smtp.local.json
+.migration-secrets.json
