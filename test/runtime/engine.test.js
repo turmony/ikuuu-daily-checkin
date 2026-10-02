@@ -173,6 +173,6 @@ test('admin API rejects invalid tokens, cross-site changes and non-object JSON',
   const headers={Authorization:`Bearer ${env.ADMIN_TOKEN}`,'Content-Type':'application/json'};
   expect((await exports.default.fetch('https://test/api/cookie',{method:'POST',headers:{...headers,Origin:'https://other'},body:'{}'})).status).toBe(403);
   expect((await exports.default.fetch('https://test/api/cookie',{method:'POST',headers,body:'null'})).status).toBe(400);
-  const response=await exports.default.fetch('https://test/api/status',{headers});expect(response.status).toBe(200);
+  const response=await exports.default.fetch('https://test/api/status',{headers});expect(response.status).toBe(401);
   expect(await response.text()).not.toContain(key);
 });

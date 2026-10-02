@@ -9,4 +9,5 @@ node_modules/
 coverage/
 smtp.local.json
 .migration-secrets.json
+.admin-session.json
 .privacy-cleanup/

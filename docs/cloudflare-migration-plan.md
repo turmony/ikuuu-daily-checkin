@@ -54,7 +54,9 @@ Promise 队列串行化管理接口与 Alarm，跨网络等待也保持账号操
 
 邮件最多四次尝试，临时错误后等待 1、5、30 分钟。SMTP 4xx 和连接失败可重试；认证或地址等 5xx 记为永久失败，管理页面显示失败。响应中只保留阶段和状态码，不记录服务器原文、用户名认证载荷或授权码。
 
-SMTP Secret 通过 Wrangler 标准输入上传。Cookie 使用 AES-GCM 加密，管理令牌使用固定长度 SHA-256 摘要的 timingSafeEqual 比较。管理接口限制请求大小和跨站变更，页面不存储管理令牌，Cookie 保存后清空输入框。
+SMTP Secret 通过 Wrangler 标准输入上传。Cookie 使用 AES-GCM 加密。原管理令牌仅作恢复码，用于首次设置密码或重置；恢复码验证使用固定长度 SHA-256 摘要的 timingSafeEqual 比较。日常密码使用随机盐、PBKDF2 和服务端 Secret 派生摘要，不保存明文。
+
+认证数据保存于独立的 auth 记录，包含密码摘要、会话版本、会话摘要和失败计数；不会改动签到 state 或 Alarm。密码修改或恢复码重置在一次存储写入中递增版本并清空全部会话。会话最长 7 天，每个管理动作在对象的串行队列中先检查有效性，再执行动作，避免鉴权缓存和检查后改密的竞态。网页使用 Secure、HttpOnly、SameSite Cookie，CLI 使用同样可撤销的会话。恢复码不能直接访问管理接口。
 
 本地 SMTP 与密钥文件被 Git 忽略，并在当前 Windows 机器限制 NTFS 访问权限。它们仍为本地明文；Cloudflare 运行时也必须读取授权码。由此不能声称零泄露风险。撤销授权码可终止旧凭证使用。
 
@@ -76,7 +78,7 @@ SMTP Secret 通过 Wrangler 标准输入上传。Cookie 使用 AES-GCM 加密，
 
 旧 GitHub 实现可从迁移前提交 af15728 恢复；恢复前须暂停 Cloudflare、同步最后成功日期并核对邮箱配置。新实现使用 126 SMTP，旧实现默认 Gmail 且包含 IMAP 查询，不应直接复用而不核对。
 
-邮箱授权码轮换：撤销旧授权码，编辑 smtp.local.json，再运行 node scripts/upload-secrets.mjs。管理令牌轮换只修改本地 ADMIN_TOKEN 再上传；保持 COOKIE_ENCRYPTION_KEY 稳定。丢失加密密钥后重新提交 Cookie。
+邮箱授权码轮换：撤销旧授权码，编辑 smtp.local.json，再运行 node scripts/upload-secrets.mjs。日常密码在管理页面修改，忘记密码用原管理令牌恢复；两种操作都会注销全部登录会话，后台调度保持运行。若更换 Secret ADMIN_TOKEN，须使用新恢复码重置密码。保持 COOKIE_ENCRYPTION_KEY 稳定，丢失加密密钥后重新提交 Cookie。
 
 ## 官方资料
 
