@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>iKuuu Cookie 同步</title><link rel="stylesheet" href="popup.css"></head>
+<body><main><h1>iKuuu Cookie 同步</h1><p>网站登录成功后自动同步一次，Cookie 变化时继续同步。</p>
+<p id="message" role="status" aria-live="polite"></p><dl id="status"></dl>
+<form id="settings"><label for="worker">签到服务地址</label><input id="worker" type="url" placeholder="https://你的服务.workers.dev" required>
+<label for="token">扩展配对令牌</label><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="在管理页面生成；已配对时留空保留">
+<label for="sites">iKuuu 网站地址</label><textarea id="sites" rows="2" spellcheck="false" required></textarea>
+<button type="submit">保存并启用自动同步</button></form>
+<div class="actions"><button id="sync">同步当前网站</button><button id="forget" class="secondary">清除本机配对</button></div>
+<p class="hint">配对令牌只允许同步 Cookie。修改管理密码后需要重新配对。浏览器关闭时，云端继续使用上次 Cookie 签到。</p>
+</main><script type="module" src="popup.js"></script></body></html>

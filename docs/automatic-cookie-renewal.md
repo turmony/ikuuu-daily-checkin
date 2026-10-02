@@ -1,5 +1,9 @@
 # 自动登录与 Cookie 更新
 
+**当前推荐 [浏览器扩展自动同步 Cookie](../extension/README.md)。** 正常登录网站并完成验证码后即自动同步一次，即使 Cookie 未变化；不需要复制 Cookie、打码服务或网站账户 Secrets。首次扩展配对会切换到浏览器模式，停止本页所述的服务器密码自动登录。原有 Secrets 可以保留但不再使用；撤销扩展不会自动重新启用密码登录。
+
+以下说明保留给尚未切换浏览器模式的旧部署。网站 Cookie 到期仍需要正常登录，浏览器扩展自动化的是凭证同步和签到恢复，不会延长网站会话或自动完成验证码。
+
 用户在 Cloudflare 手动添加 `IKUUU_EMAIL` 和 `IKUUU_PASSWORD` Secrets 后，现有 Worker / SQLite Durable Object / Alarm 承担 Cookie 更新，无需新增服务器或定时服务。网站账户与管理页面账户独立。
 
 ## 使用方式

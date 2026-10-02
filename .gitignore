@@ -11,3 +11,4 @@ smtp.local.json
 .migration-secrets.json
 .admin-session.json
 .privacy-cleanup/
+artifacts/
