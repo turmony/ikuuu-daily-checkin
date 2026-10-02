@@ -99,9 +99,12 @@ test('password and recovery brute-force limits persist, reset and do not lock ot
 test('password policy rejects invalid values without clearing active sessions',async()=>{
   await scenario(async({auth})=>{
     await expect(auth.recover(recovery,'short','a')).rejects.toMatchObject({status:400});
-    await auth.recover(recovery,password,'a');const session=await auth.login(password,'a');
-    await expect(auth.change(session.token,password,'x'.repeat(129),'a')).rejects.toMatchObject({status:400});
+    await auth.recover(recovery,'six123','a');const session=await auth.login('six123','a');
+    await expect(auth.change(session.token,'six123','short','a')).rejects.toMatchObject({status:400});
+    await expect(auth.change(session.token,'six123','x'.repeat(129),'a')).rejects.toMatchObject({status:400});
     expect((await auth.status(session.token)).authenticated).toBe(true);
+    await auth.change(session.token,'six123','new456','a');
+    expect((await auth.login('new456','a')).token).toBeTruthy();
   });
 });
 

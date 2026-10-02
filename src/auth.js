@@ -8,8 +8,8 @@ const ITERATIONS = 100_000;
 export const SESSION_MS = 7 * 86_400_000;
 
 function validPassword(value) {
-  if(typeof value!=='string' || value.length<10 || value.length>128 || !value.trim()) {
-    throw new InputError('密码须为 10–128 个字符');
+  if(typeof value!=='string' || value.length<6 || value.length>128 || !value.trim()) {
+    throw new InputError('密码须为 6–128 个字符');
   }
 }
 
